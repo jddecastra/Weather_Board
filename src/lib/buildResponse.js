@@ -1,36 +1,76 @@
-import { REGIONS, getAirportConfig } from "../config/airports.js";
+import { REGIONS } from "../config/airports.js";
 import { buildMetarObject, buildMetarExpandedDetail, buildNoMetarObject } from "./metar.js";
 import { buildTafObject, buildTafExpandedDetail, buildNoTafObject } from "./taf.js";
 
 export function buildDashboardResponse({
   metarRecords = [],
   tafRecords = [],
+  fallbackCurrentRecords = [],
+  fallbackForecastRecords = [],
   lastUpdatedUtc = new Date().toISOString()
 }) {
   const metarMap = indexRecordsByAirportId(metarRecords, getMetarAirportId);
   const tafMap = indexRecordsByAirportId(tafRecords, getTafAirportId);
+  const fallbackCurrentMap = indexRecordsByAirportId(
+    fallbackCurrentRecords,
+    getFallbackAirportId
+  );
+  const fallbackForecastMap = indexRecordsByAirportId(
+    fallbackForecastRecords,
+    getFallbackAirportId
+  );
 
   const regionResults = REGIONS.map(region => {
     const airportResults = region.airports.map(airportConfig => {
       const airportId = airportConfig.airportId;
 
-      const metarObj = metarMap.has(airportId)
-        ? buildMetarObject(metarMap.get(airportId))
-        : buildNoMetarObject();
+      let metarObj;
+      if (metarMap.has(airportId)) {
+        metarObj = applySourceSafetyMetadata(
+          buildMetarObject(metarMap.get(airportId)),
+          "METAR"
+        );
+      } else if (fallbackCurrentMap.has(airportId)) {
+        metarObj = applySourceSafetyMetadata(
+          buildFallbackCurrentObject(fallbackCurrentMap.get(airportId)),
+          "FORECAST_CURRENT"
+        );
+      } else {
+        metarObj = applySourceSafetyMetadata(buildNoMetarObject(), "NO_METAR");
+      }
 
-      const tafObj = tafMap.has(airportId)
-        ? buildTafObject(tafMap.get(airportId))
-        : buildNoTafObject();
+      let tafObj;
+      if (tafMap.has(airportId)) {
+        tafObj = applySourceSafetyMetadata(
+          buildTafObject(tafMap.get(airportId)),
+          "TAF"
+        );
+      } else if (fallbackForecastMap.has(airportId)) {
+        tafObj = applySourceSafetyMetadata(
+          buildFallbackForecastObject(fallbackForecastMap.get(airportId)),
+          "FORECAST"
+        );
+      } else {
+        tafObj = applySourceSafetyMetadata(buildNoTafObject(), "NO_TAF");
+      }
 
       const expandedDetails = [];
 
-      const metarDetail = buildMetarExpandedDetail(airportId, metarObj);
+      const metarDetail =
+        metarObj?.sourceType === "METAR"
+          ? buildMetarExpandedDetail(airportId, metarObj)
+          : buildFallbackExpandedDetail(airportId, metarObj, "Current");
+
       if (metarDetail) expandedDetails.push(metarDetail);
 
-      const tafDetail = buildTafExpandedDetail(airportId, tafObj);
+      const tafDetail =
+        tafObj?.sourceType === "TAF"
+          ? buildTafExpandedDetail(airportId, tafObj)
+          : buildFallbackExpandedDetail(airportId, tafObj, "Forecast");
+
       if (tafDetail) expandedDetails.push(tafDetail);
 
-      const airportResult = {
+      return {
         airportId,
         sortIndex: airportConfig.sortIndex,
         metar: metarObj,
@@ -38,8 +78,6 @@ export function buildDashboardResponse({
         showExpandedRow: expandedDetails.length > 0,
         expandedDetails
       };
-
-      return airportResult;
     });
 
     airportResults.sort((a, b) => a.sortIndex - b.sortIndex);
@@ -60,12 +98,126 @@ export function buildDashboardResponse({
   };
 }
 
+function applySourceSafetyMetadata(weatherObj, sourceType) {
+  if (!weatherObj) return weatherObj;
+
+  const isOfficial = sourceType === "METAR" || sourceType === "TAF";
+
+  weatherObj.isOfficial = isOfficial;
+  weatherObj.sourceAuthority = isOfficial
+    ? "OFFICIAL_AVIATION"
+    : "NON_AVIATION_DERIVED";
+  weatherObj.sourceType = sourceType;
+
+  if (sourceType === "METAR") {
+    weatherObj.sourceLabel = "METAR (Official)";
+    weatherObj.warningText = null;
+  } else if (sourceType === "TAF") {
+    weatherObj.sourceLabel = "TAF (Official)";
+    weatherObj.warningText = null;
+  } else if (sourceType === "FORECAST_CURRENT") {
+    weatherObj.sourceLabel = "Forecast Derived (Non-Aviation)";
+    weatherObj.warningText =
+      "⚠️ Non-aviation weather source. Not approved for operational flight decisions.";
+  } else if (sourceType === "FORECAST") {
+    weatherObj.sourceLabel = "Forecast Derived (Non-Aviation)";
+    weatherObj.warningText =
+      "⚠️ Non-aviation weather source. Not approved for operational flight decisions.";
+  } else if (sourceType === "NO_METAR") {
+    weatherObj.sourceLabel = "No METAR Available";
+    weatherObj.warningText = weatherObj.hasData
+      ? "⚠️ Non-aviation weather source. Not approved for operational flight decisions."
+      : null;
+  } else if (sourceType === "NO_TAF") {
+    weatherObj.sourceLabel = "No TAF Available";
+    weatherObj.warningText = weatherObj.hasData
+      ? "⚠️ Non-aviation weather source. Not approved for operational flight decisions."
+      : null;
+  } else {
+    weatherObj.sourceLabel = "Non-Aviation Source";
+    weatherObj.warningText =
+      "⚠️ Non-aviation weather source. Not approved for operational flight decisions.";
+  }
+
+  return weatherObj;
+}
+
+function buildFallbackCurrentObject(record) {
+  const category = normalizeFallbackCategory(record?.category);
+  const status = normalizeFallbackStatus(record?.status, category);
+  const reason =
+    record?.reason ||
+    record?.summary ||
+    record?.detail ||
+    "Estimated current conditions from non-aviation source.";
+
+  return {
+    status,
+    severityRank: getSeverityRankFromStatus(status),
+    category,
+    reason,
+    rawText: record?.rawText || record?.summary || "",
+    ceilingFt: record?.ceilingFt ?? null,
+    visibilitySm: record?.visibilitySm ?? null,
+    triggerType: record?.triggerType || "NONE",
+    isAlert: false,
+    hasData: true,
+    derived: true
+  };
+}
+
+function buildFallbackForecastObject(record) {
+  const category = normalizeFallbackCategory(record?.category);
+  const status = normalizeFallbackStatus(record?.status, category);
+  const reason =
+    record?.reason ||
+    record?.summary ||
+    record?.detail ||
+    "Estimated forecast conditions from non-aviation source.";
+
+  return {
+    status,
+    severityRank: getSeverityRankFromStatus(status),
+    category,
+    reason,
+    rawText: record?.rawText || record?.summary || "",
+    worstPeriod: {
+      category,
+      status,
+      severityRank: getSeverityRankFromStatus(status),
+      reason,
+      fromUtc: record?.validFrom || null,
+      toUtc: record?.validTo || null,
+      ceilingFt: record?.ceilingFt ?? null,
+      visibilitySm: record?.visibilitySm ?? null,
+      triggerType: record?.triggerType || "NONE"
+    },
+    evaluatedPeriods: Array.isArray(record?.evaluatedPeriods)
+      ? record.evaluatedPeriods
+      : [],
+    isAlert: false,
+    hasData: true,
+    derived: true
+  };
+}
+
+function buildFallbackExpandedDetail(airportId, weatherObj, label) {
+  if (!weatherObj?.hasData) return null;
+
+  return {
+    source: weatherObj.sourceType || label.toUpperCase(),
+    severity: weatherObj.status || "gray",
+    headline: `${label} Derived Weather`,
+    detail: `${airportId} ${label.toLowerCase()} weather is estimated from a non-aviation source and is not approved for operational flight decisions.`
+  };
+}
+
 function buildAlerts(regions) {
   const alerts = [];
 
   for (const region of regions) {
     for (const airport of region.airports) {
-      if (airport.metar?.isAlert) {
+      if (airport.metar?.isOfficial && airport.metar?.isAlert) {
         alerts.push(
           buildAlertObject({
             airportId: airport.airportId,
@@ -77,7 +229,7 @@ function buildAlerts(regions) {
         );
       }
 
-      if (airport.taf?.isAlert) {
+      if (airport.taf?.isOfficial && airport.taf?.isAlert) {
         alerts.push(
           buildAlertObject({
             airportId: airport.airportId,
@@ -135,8 +287,8 @@ function compareRegionOrder(regionIdA, regionIdB) {
 }
 
 function compareAirportOrder(airportIdA, airportIdB) {
-  const airportA = getAirportConfig(airportIdA);
-  const airportB = getAirportConfig(airportIdB);
+  const airportA = getAirportConfigSafe(airportIdA);
+  const airportB = getAirportConfigSafe(airportIdB);
 
   if (!airportA && !airportB) return 0;
   if (!airportA) return 1;
@@ -156,6 +308,20 @@ function compareSourceOrder(sourceA, sourceB) {
   };
 
   return (order[sourceA] ?? 99) - (order[sourceB] ?? 99);
+}
+
+function getAirportConfigSafe(airportId) {
+  for (const region of REGIONS) {
+    const airport = region.airports.find(a => a.airportId === airportId);
+    if (airport) {
+      return {
+        regionId: region.id,
+        regionName: region.name,
+        ...airport
+      };
+    }
+  }
+  return null;
 }
 
 function indexRecordsByAirportId(records, getAirportId) {
@@ -195,7 +361,65 @@ function getTafAirportId(record) {
   );
 }
 
+function getFallbackAirportId(record) {
+  return (
+    record?.airportId ||
+    record?.icaoId ||
+    record?.icao_id ||
+    record?.stationId ||
+    record?.station_id ||
+    record?.id ||
+    null
+  );
+}
+
 function normalizeAirportId(value) {
   if (!value || typeof value !== "string") return null;
   return value.trim().toUpperCase();
+}
+
+function normalizeFallbackCategory(value) {
+  const text = String(value || "").trim().toUpperCase();
+
+  if (text === "LIFR") return "LIFR";
+  if (text === "IFR") return "IFR";
+  if (text === "MARGINAL" || text === "MVFR") return "MARGINAL";
+  if (text === "VFR") return "VFR";
+  return "NO_DATA";
+}
+
+function normalizeFallbackStatus(status, category) {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  if (["green", "blue", "red", "purple", "gray"].includes(normalizedStatus)) {
+    return normalizedStatus;
+  }
+
+  switch (category) {
+    case "VFR":
+      return "green";
+    case "MARGINAL":
+      return "blue";
+    case "IFR":
+      return "red";
+    case "LIFR":
+      return "purple";
+    default:
+      return "gray";
+  }
+}
+
+function getSeverityRankFromStatus(status) {
+  switch (status) {
+    case "purple":
+      return 3;
+    case "red":
+      return 2;
+    case "blue":
+      return 1;
+    case "green":
+      return 0;
+    case "gray":
+    default:
+      return -1;
+  }
 }
