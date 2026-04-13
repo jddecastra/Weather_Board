@@ -75,12 +75,24 @@ function renderRegionCard(region) {
 function renderAirportBlock(airport) {
   const primaryRow = `
     <tr class="airport-row">
-      <td class="airport-cell metar-cell ${statusClass(airport.metar?.status)}" title="${escapeHtml(airport.metar?.rawText || "")}">
+      <td class="airport-cell metar-cell ${getDisplayClass(airport.metar)}" title="${escapeHtml(airport.metar?.rawText || "")}">
         <div class="airport-code">${escapeHtml(airport.airportId)}</div>
-        <div class="cell-reason">${escapeHtml(airport.metar?.reason || "")}</div>
+        <div class="source-label">${escapeHtml(getDisplaySourceLabel(airport.metar))}</div>
+        <div class="cell-reason">${escapeHtml(getDisplayReason(airport.metar))}</div>
+        ${
+          !airport.metar?.isOfficial && airport.metar?.warningText
+            ? `<div class="warning-text">${escapeHtml(airport.metar.warningText)}</div>`
+            : ""
+        }
       </td>
-      <td class="taf-cell ${statusClass(airport.taf?.status)}" title="${escapeHtml(airport.taf?.rawText || "")}">
-        <div class="taf-reason">${escapeHtml(airport.taf?.reason || "")}</div>
+      <td class="taf-cell ${getDisplayClass(airport.taf)}" title="${escapeHtml(airport.taf?.rawText || "")}">
+        <div class="source-label">${escapeHtml(getDisplaySourceLabel(airport.taf))}</div>
+        <div class="taf-reason">${escapeHtml(getDisplayReason(airport.taf))}</div>
+        ${
+          !airport.taf?.isOfficial && airport.taf?.warningText
+            ? `<div class="warning-text">${escapeHtml(airport.taf.warningText)}</div>`
+            : ""
+        }
       </td>
     </tr>
   `;
@@ -133,6 +145,30 @@ function renderAlertCard(alert) {
       <div class="alert-detail">${escapeHtml(alert.detail || "")}</div>
     </article>
   `;
+}
+
+function getDisplayClass(weatherObj) {
+  if (!weatherObj) return "status-gray";
+
+  if (!weatherObj.isOfficial && weatherObj.status === "green") {
+    return "status-nonav";
+  }
+
+  return statusClass(weatherObj.status);
+}
+
+function getDisplaySourceLabel(weatherObj) {
+  return weatherObj?.sourceLabel || "";
+}
+
+function getDisplayReason(weatherObj) {
+  if (!weatherObj) return "";
+
+  if (!weatherObj.isOfficial && weatherObj.reason) {
+    return `${weatherObj.reason} (Estimated)`;
+  }
+
+  return weatherObj.reason || "";
 }
 
 function statusClass(status) {
