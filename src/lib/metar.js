@@ -158,6 +158,19 @@ function parseCeilingFromRawText(rawText) {
 function parseVisibilityFromRawText(rawText) {
   if (!rawText) return null;
 
+  // CAVOK = 10km+ visibility and no significant low cloud/weather
+  if (/\bCAVOK\b/.test(rawText)) {
+    return 6;
+  }
+
+  // International METAR visibility in meters:
+  // 9999 = 10km or more
+  const meters9999 = rawText.match(/\b9999\b/);
+  if (meters9999) {
+    return 6;
+  }
+
+  // Explicit SM formats
   const lessThanQuarter = rawText.match(/\bM?1\/4SM\b/);
   if (lessThanQuarter) {
     return 0.25;
@@ -191,7 +204,29 @@ function parseVisibilityFromRawText(rawText) {
     return Number.isNaN(value) ? null : value;
   }
 
+  // International ICAO metric visibility in meters.
+  // Usually appears as a 4-digit group like 0800, 3000, 5000, 8000, 9999.
+  // We try to capture the visibility group after wind and before cloud/weather groups.
+  const metricMatch = rawText.match(
+    /\b\d{5}(?:G\d{2,3})?KT\s+(?:(\d{4})|CAVOK)\b/
+  );
+
+  if (metricMatch && metricMatch[1]) {
+    const meters = Number(metricMatch[1]);
+    if (!Number.isNaN(meters)) {
+      return metersToStatuteMiles(meters);
+    }
+  }
+
   return null;
+}
+
+function metersToStatuteMiles(meters) {
+  if (!Number.isFinite(meters)) return null;
+
+  // 9999 already handled above; cap large values at 6 to stay consistent with P6SM
+  const sm = meters / 1609.34;
+  return sm >= 6 ? 6 : Number(sm.toFixed(1));
 }
 
 function formatThresholdLabel(category) {

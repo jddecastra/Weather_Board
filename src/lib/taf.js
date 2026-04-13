@@ -282,6 +282,13 @@ function extractCeilingFromTokens(tokens) {
 function extractVisibilityFromTokens(tokens) {
   const joined = tokens.join(" ");
 
+  // CAVOK = 10km+ visibility and no significant low cloud/weather
+  if (/\bCAVOK\b/.test(joined)) return 6;
+
+  // International metric visibility
+  if (/\b9999\b/.test(joined)) return 6;
+
+  // U.S./aviation SM formats
   if (/\bP6SM\b/.test(joined)) return 6;
 
   const lessThanQuarter = joined.match(/\bM?1\/4SM\b/);
@@ -308,7 +315,30 @@ function extractVisibilityFromTokens(tokens) {
     return Number.isNaN(value) ? null : value;
   }
 
+  // ICAO metric visibility groups in meters
+  // Match standalone 4-digit groups, then pick the first plausible visibility token
+  const metricMatches = [...joined.matchAll(/\b(\d{4})\b/g)]
+    .map(match => Number(match[1]))
+    .filter(value => {
+      if (Number.isNaN(value)) return false;
+      // Reasonable visibility groups in meters
+      return value >= 0 && value <= 9999;
+    });
+
+  if (metricMatches.length > 0) {
+    return metersToStatuteMiles(metricMatches[0]);
+  }
+
   return null;
+}
+
+function metersToStatuteMiles(meters) {
+  if (!Number.isFinite(meters)) return null;
+
+  if (meters >= 9999) return 6;
+
+  const sm = meters / 1609.34;
+  return sm >= 6 ? 6 : Number(sm.toFixed(1));
 }
 
 function resolveGroupTimes(group, issueTimeUtc, validPeriod) {
