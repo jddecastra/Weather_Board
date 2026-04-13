@@ -1,0 +1,14 @@
+{
+  "name": "weather-board",
+  "version": "1.0.0",
+  "description": "Aviation METAR and TAF dashboard",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "netlify dev",
+    "build": "echo \"No build step required yet\""
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
+  }
+}
