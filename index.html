@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weather Board</title>
+  <link rel="stylesheet" href="/src/styles/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="top-bar">
+      <div class="title-block">
+        <h1>Weather Board</h1>
+        <div class="subtitle">METAR / TAF Operational Dashboard</div>
+      </div>
+      <div class="status-block">
+        <div class="timestamp-label">Last Updated</div>
+        <div id="last-updated" class="timestamp-value">Loading...</div>
+      </div>
+    </header>
+
+    <main class="main-layout">
+      <section id="regions-grid" class="regions-grid">
+        <div class="loading-panel">Loading dashboard...</div>
+      </section>
+
+      <section class="alerts-section">
+        <div class="alerts-header">
+          <h2>IFR / LIFR Alerts</h2>
+        </div>
+        <div id="alerts-panel" class="alerts-panel">
+          <div class="empty-alerts">No active IFR/LIFR alerts.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/src/app/main.js"></script>
+</body>
+</html>
