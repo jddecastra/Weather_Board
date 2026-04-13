@@ -16,15 +16,11 @@ export async function handler() {
     ]);
 
     const metarAirportSet = new Set(
-      metarRecords
-        .map(getRecordAirportId)
-        .filter(Boolean)
+      metarRecords.map(getRecordAirportId).filter(Boolean)
     );
 
     const tafAirportSet = new Set(
-      tafRecords
-        .map(getRecordAirportId)
-        .filter(Boolean)
+      tafRecords.map(getRecordAirportId).filter(Boolean)
     );
 
     const fallbackCurrentTargets = airportConfigs.filter(
@@ -146,33 +142,23 @@ function buildOpenMeteoUrl(airport, mode) {
     timezone: "UTC",
     forecast_days: "1",
     wind_speed_unit: "kn",
-    precipitation_unit: "inch",
     visibility_unit: "mi"
   });
 
+  const commonFields = [
+    "visibility",
+    "cloud_cover",
+    "cloud_cover_low",
+    "cloud_cover_mid",
+    "cloud_cover_high",
+    "wind_speed_10m",
+    "weather_code"
+  ].join(",");
+
   if (mode === "current") {
-    baseParams.set(
-      "current",
-      [
-        "temperature_2m",
-        "wind_speed_10m",
-        "visibility",
-        "cloud_cover",
-        "cloud_base",
-        "weather_code"
-      ].join(",")
-    );
+    baseParams.set("current", commonFields);
   } else {
-    baseParams.set(
-      "hourly",
-      [
-        "visibility",
-        "cloud_cover",
-        "cloud_base",
-        "wind_speed_10m",
-        "weather_code"
-      ].join(",")
-    );
+    baseParams.set("hourly", commonFields);
   }
 
   return `${OPEN_METEO_BASE_URL}?${baseParams.toString()}`;
@@ -183,22 +169,49 @@ function mapOpenMeteoCurrentToFallbackRecord(airport, data) {
   if (!current) return null;
 
   const visibilitySm = normalizeNumber(current.visibility);
-  const ceilingFt = normalizeFeet(current.cloud_base);
+  const lowCloudCover = normalizeNumber(current.cloud_cover_low);
+  const midCloudCover = normalizeNumber(current.cloud_cover_mid);
+  const highCloudCover = normalizeNumber(current.cloud_cover_high);
+  const totalCloudCover = normalizeNumber(current.cloud_cover);
   const windKt = normalizeNumber(current.wind_speed_10m);
+  const weatherCode = current.weather_code ?? null;
 
-  const classification = classifyFlightCategory({ visibilitySm, ceilingFt });
+  const classification = classifyFallbackCategory({
+    visibilitySm,
+    ceilingFt: null,
+    lowCloudCover
+  });
 
   return {
     airportId: airport.airportId,
     category: classification.category,
     status: classification.status,
-    reason: buildFallbackReason(classification, visibilitySm, ceilingFt),
+    reason: buildFallbackReason({
+      classification,
+      visibilitySm,
+      ceilingFt: null,
+      lowCloudCover
+    }),
     visibilitySm,
-    ceilingFt,
+    ceilingFt: null,
     windKt,
     triggerType: classification.triggerType,
-    rawText: `Derived from forecast model current conditions`,
-    summary: `Derived current weather from non-aviation source`
+    rawText: "Derived from forecast model current conditions",
+    summary: "Derived current weather from non-aviation source",
+    rawSource: {
+      provider: "Open-Meteo",
+      mode: "current",
+      airportLat: airport.lat,
+      airportLon: airport.lon,
+      current
+    },
+    debugFlags: {
+      lowCloudCover,
+      midCloudCover,
+      highCloudCover,
+      totalCloudCover,
+      ceilingHeuristicTriggered: classification.ceilingHeuristicTriggered
+    }
   };
 }
 
@@ -207,12 +220,22 @@ function mapOpenMeteoForecastToFallbackRecord(airport, data) {
   if (!hourly?.time?.length) return null;
 
   let worst = null;
+  const evaluatedPeriods = [];
 
   for (let i = 0; i < hourly.time.length; i += 1) {
     const visibilitySm = normalizeNumber(hourly.visibility?.[i]);
-    const ceilingFt = normalizeFeet(hourly.cloud_base?.[i]);
+    const lowCloudCover = normalizeNumber(hourly.cloud_cover_low?.[i]);
+    const midCloudCover = normalizeNumber(hourly.cloud_cover_mid?.[i]);
+    const highCloudCover = normalizeNumber(hourly.cloud_cover_high?.[i]);
+    const totalCloudCover = normalizeNumber(hourly.cloud_cover?.[i]);
+    const windKt = normalizeNumber(hourly.wind_speed_10m?.[i]);
+    const weatherCode = hourly.weather_code?.[i] ?? null;
 
-    const classification = classifyFlightCategory({ visibilitySm, ceilingFt });
+    const classification = classifyFallbackCategory({
+      visibilitySm,
+      ceilingFt: null,
+      lowCloudCover
+    });
 
     const period = {
       fromUtc: hourly.time[i],
@@ -222,8 +245,17 @@ function mapOpenMeteoForecastToFallbackRecord(airport, data) {
       severityRank: classification.severityRank,
       triggerType: classification.triggerType,
       visibilitySm,
-      ceilingFt
+      ceilingFt: null,
+      windKt,
+      weatherCode,
+      lowCloudCover,
+      midCloudCover,
+      highCloudCover,
+      totalCloudCover,
+      ceilingHeuristicTriggered: classification.ceilingHeuristicTriggered
     };
+
+    evaluatedPeriods.push(period);
 
     if (!worst || period.severityRank > worst.severityRank) {
       worst = period;
@@ -236,53 +268,134 @@ function mapOpenMeteoForecastToFallbackRecord(airport, data) {
     airportId: airport.airportId,
     category: worst.category,
     status: worst.status,
-    reason: buildFallbackReason(worst, worst.visibilitySm, worst.ceilingFt),
+    reason: buildFallbackReason({
+      classification: worst,
+      visibilitySm: worst.visibilitySm,
+      ceilingFt: null,
+      lowCloudCover: worst.lowCloudCover
+    }),
     visibilitySm: worst.visibilitySm,
-    ceilingFt: worst.ceilingFt,
+    ceilingFt: null,
     triggerType: worst.triggerType,
     validFrom: worst.fromUtc,
     validTo: worst.toUtc,
-    rawText: `Derived from forecast model hourly conditions`,
-    summary: `Derived forecast weather from non-aviation source`,
-    evaluatedPeriods: [worst]
+    rawText: "Derived from forecast model hourly conditions",
+    summary: "Derived forecast weather from non-aviation source",
+    evaluatedPeriods,
+    rawSource: {
+      provider: "Open-Meteo",
+      mode: "forecast",
+      airportLat: airport.lat,
+      airportLon: airport.lon,
+      hourly
+    },
+    debugFlags: {
+      lowCloudCover: worst.lowCloudCover,
+      midCloudCover: worst.midCloudCover,
+      highCloudCover: worst.highCloudCover,
+      totalCloudCover: worst.totalCloudCover,
+      ceilingHeuristicTriggered: worst.ceilingHeuristicTriggered
+    }
   };
 }
 
-function classifyFlightCategory({ visibilitySm, ceilingFt }) {
+function classifyFallbackCategory({ visibilitySm, ceilingFt, lowCloudCover }) {
   if (visibilitySm !== null && visibilitySm < 1) {
-    return { category: "LIFR", status: "purple", severityRank: 3, triggerType: "VISIBILITY" };
+    return {
+      category: "LIFR",
+      status: "purple",
+      severityRank: 3,
+      triggerType: "VISIBILITY",
+      ceilingHeuristicTriggered: false
+    };
   }
 
   if (ceilingFt !== null && ceilingFt < 500) {
-    return { category: "LIFR", status: "purple", severityRank: 3, triggerType: "CEILING" };
+    return {
+      category: "LIFR",
+      status: "purple",
+      severityRank: 3,
+      triggerType: "CEILING",
+      ceilingHeuristicTriggered: false
+    };
   }
 
   if (visibilitySm !== null && visibilitySm < 3) {
-    return { category: "IFR", status: "red", severityRank: 2, triggerType: "VISIBILITY" };
+    return {
+      category: "IFR",
+      status: "red",
+      severityRank: 2,
+      triggerType: "VISIBILITY",
+      ceilingHeuristicTriggered: false
+    };
   }
 
   if (ceilingFt !== null && ceilingFt < 1000) {
-    return { category: "IFR", status: "red", severityRank: 2, triggerType: "CEILING" };
+    return {
+      category: "IFR",
+      status: "red",
+      severityRank: 2,
+      triggerType: "CEILING",
+      ceilingHeuristicTriggered: false
+    };
+  }
+
+  // Conservative ceiling-risk heuristic:
+  // If low cloud cover is very high and we do not have a real ceiling,
+  // force estimated IFR to prompt human review.
+  if (ceilingFt === null && lowCloudCover !== null && lowCloudCover >= 85) {
+    return {
+      category: "IFR",
+      status: "red",
+      severityRank: 2,
+      triggerType: "LOW_CLOUD_HEURISTIC",
+      ceilingHeuristicTriggered: true
+    };
   }
 
   if (visibilitySm !== null && visibilitySm <= 5) {
-    return { category: "MARGINAL", status: "blue", severityRank: 1, triggerType: "VISIBILITY" };
+    return {
+      category: "MARGINAL",
+      status: "blue",
+      severityRank: 1,
+      triggerType: "VISIBILITY",
+      ceilingHeuristicTriggered: false
+    };
   }
 
   if (ceilingFt !== null && ceilingFt <= 3000) {
-    return { category: "MARGINAL", status: "blue", severityRank: 1, triggerType: "CEILING" };
+    return {
+      category: "MARGINAL",
+      status: "blue",
+      severityRank: 1,
+      triggerType: "CEILING",
+      ceilingHeuristicTriggered: false
+    };
   }
 
-  return { category: "VFR", status: "green", severityRank: 0, triggerType: "NONE" };
+  return {
+    category: "VFR",
+    status: "green",
+    severityRank: 0,
+    triggerType: "NONE",
+    ceilingHeuristicTriggered: false
+  };
 }
 
-function buildFallbackReason(classification, visibilitySm, ceilingFt) {
+function buildFallbackReason({ classification, visibilitySm, ceilingFt, lowCloudCover }) {
   if (classification.triggerType === "VISIBILITY" && visibilitySm !== null) {
     return `Estimated by visibility ${visibilitySm} SM`;
   }
 
   if (classification.triggerType === "CEILING" && ceilingFt !== null) {
     return `Estimated by cloud base ${ceilingFt} ft`;
+  }
+
+  if (
+    classification.triggerType === "LOW_CLOUD_HEURISTIC" &&
+    lowCloudCover !== null
+  ) {
+    return `Estimated IFR due to high low-cloud coverage (${lowCloudCover}%) - investigate official weather`;
   }
 
   return "Estimated from non-aviation forecast data";
@@ -305,13 +418,6 @@ function normalizeNumber(value) {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-function normalizeFeet(value) {
-  if (value === null || value === undefined) return null;
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.round(n * 3.28084);
 }
 
 function jsonResponse(statusCode, body) {
