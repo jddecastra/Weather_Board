@@ -54,19 +54,20 @@ export function buildDashboardResponse({
         tafObj = applySourceSafetyMetadata(buildNoTafObject(), "NO_TAF");
       }
 
+      // Only show expanded rows for OFFICIAL aviation alerts
       const expandedDetails = [];
 
       const metarDetail =
-        metarObj?.sourceType === "METAR"
+        metarObj?.isOfficial && metarObj?.sourceType === "METAR"
           ? buildMetarExpandedDetail(airportId, metarObj)
-          : buildFallbackExpandedDetail(airportId, metarObj, "Current");
+          : null;
 
       if (metarDetail) expandedDetails.push(metarDetail);
 
       const tafDetail =
-        tafObj?.sourceType === "TAF"
+        tafObj?.isOfficial && tafObj?.sourceType === "TAF"
           ? buildTafExpandedDetail(airportId, tafObj)
-          : buildFallbackExpandedDetail(airportId, tafObj, "Forecast");
+          : null;
 
       if (tafDetail) expandedDetails.push(tafDetail);
 
@@ -118,28 +119,42 @@ function applySourceSafetyMetadata(weatherObj, sourceType) {
   } else if (sourceType === "FORECAST_CURRENT") {
     weatherObj.sourceLabel = "Forecast Derived (Non-Aviation)";
     weatherObj.warningText =
-      "⚠️ Non-aviation weather source. Not approved for operational flight decisions.";
+      "Non-aviation weather source. Not approved for operational flight decisions.";
   } else if (sourceType === "FORECAST") {
     weatherObj.sourceLabel = "Forecast Derived (Non-Aviation)";
     weatherObj.warningText =
-      "⚠️ Non-aviation weather source. Not approved for operational flight decisions.";
+      "Non-aviation weather source. Not approved for operational flight decisions.";
   } else if (sourceType === "NO_METAR") {
     weatherObj.sourceLabel = "No METAR Available";
-    weatherObj.warningText = weatherObj.hasData
-      ? "⚠️ Non-aviation weather source. Not approved for operational flight decisions."
-      : null;
+    weatherObj.warningText = null;
   } else if (sourceType === "NO_TAF") {
     weatherObj.sourceLabel = "No TAF Available";
-    weatherObj.warningText = weatherObj.hasData
-      ? "⚠️ Non-aviation weather source. Not approved for operational flight decisions."
-      : null;
+    weatherObj.warningText = null;
   } else {
     weatherObj.sourceLabel = "Non-Aviation Source";
     weatherObj.warningText =
-      "⚠️ Non-aviation weather source. Not approved for operational flight decisions.";
+      "Non-aviation weather source. Not approved for operational flight decisions.";
   }
 
+  // Backend-only debug fields for validation
+  weatherObj.debug = buildWeatherDebugObject(weatherObj);
+
   return weatherObj;
+}
+
+function buildWeatherDebugObject(weatherObj) {
+  return {
+    sourceType: weatherObj?.sourceType || null,
+    isOfficial: weatherObj?.isOfficial ?? false,
+    category: weatherObj?.category || null,
+    status: weatherObj?.status || null,
+    triggerType: weatherObj?.triggerType || weatherObj?.worstPeriod?.triggerType || null,
+    ceilingFt: weatherObj?.ceilingFt ?? weatherObj?.worstPeriod?.ceilingFt ?? null,
+    visibilitySm: weatherObj?.visibilitySm ?? weatherObj?.worstPeriod?.visibilitySm ?? null,
+    validFrom: weatherObj?.worstPeriod?.fromUtc || null,
+    validTo: weatherObj?.worstPeriod?.toUtc || null,
+    reason: weatherObj?.reason || null
+  };
 }
 
 function buildFallbackCurrentObject(record) {
@@ -159,6 +174,7 @@ function buildFallbackCurrentObject(record) {
     rawText: record?.rawText || record?.summary || "",
     ceilingFt: record?.ceilingFt ?? null,
     visibilitySm: record?.visibilitySm ?? null,
+    windKt: record?.windKt ?? null,
     triggerType: record?.triggerType || "NONE",
     isAlert: false,
     hasData: true,
@@ -198,17 +214,6 @@ function buildFallbackForecastObject(record) {
     isAlert: false,
     hasData: true,
     derived: true
-  };
-}
-
-function buildFallbackExpandedDetail(airportId, weatherObj, label) {
-  if (!weatherObj?.hasData) return null;
-
-  return {
-    source: weatherObj.sourceType || label.toUpperCase(),
-    severity: weatherObj.status || "gray",
-    headline: `${label} Derived Weather`,
-    detail: `${airportId} ${label.toLowerCase()} weather is estimated from a non-aviation source and is not approved for operational flight decisions.`
   };
 }
 
