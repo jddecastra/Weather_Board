@@ -77,17 +77,20 @@ function renderAirportBlock(airport) {
     <tr class="airport-row">
       <td class="airport-cell metar-cell ${getDisplayClass(airport.metar)}" title="${escapeHtml(airport.metar?.rawText || "")}">
         <div class="airport-code">${escapeHtml(airport.airportId)}</div>
-        <div class="source-label">${escapeHtml(getDisplaySourceLabel(airport.metar))}</div>
-        <div class="cell-reason">${escapeHtml(getDisplayReason(airport.metar))}</div>
+        <div class="category-line">${escapeHtml(getCategoryDisplayText(airport.metar))}</div>
+        <div class="source-label">${escapeHtml(airport.metar?.sourceLabel || "")}</div>
+        <div class="cell-reason">${escapeHtml(airport.metar?.reason || "")}</div>
         ${
           !airport.metar?.isOfficial && airport.metar?.warningText
             ? `<div class="warning-text">${escapeHtml(airport.metar.warningText)}</div>`
             : ""
         }
       </td>
+
       <td class="taf-cell ${getDisplayClass(airport.taf)}" title="${escapeHtml(airport.taf?.rawText || "")}">
-        <div class="source-label">${escapeHtml(getDisplaySourceLabel(airport.taf))}</div>
-        <div class="taf-reason">${escapeHtml(getDisplayReason(airport.taf))}</div>
+        <div class="category-line">${escapeHtml(getCategoryDisplayText(airport.taf))}</div>
+        <div class="source-label">${escapeHtml(airport.taf?.sourceLabel || "")}</div>
+        <div class="taf-reason">${escapeHtml(airport.taf?.reason || "")}</div>
         ${
           !airport.taf?.isOfficial && airport.taf?.warningText
             ? `<div class="warning-text">${escapeHtml(airport.taf.warningText)}</div>`
@@ -147,6 +150,30 @@ function renderAlertCard(alert) {
   `;
 }
 
+function getCategoryDisplayText(weatherObj) {
+  if (!weatherObj?.hasData) {
+    return "No Data";
+  }
+
+  const category = String(weatherObj.category || "").toUpperCase();
+
+  const labelMap = {
+    VFR: "VFR",
+    MARGINAL: "Marginal",
+    IFR: "IFR",
+    LIFR: "LIFR",
+    NO_DATA: "No Data"
+  };
+
+  const baseLabel = labelMap[category] || category || "No Data";
+
+  if (!weatherObj.isOfficial) {
+    return `⚠ ${baseLabel} (Estimated)`;
+  }
+
+  return baseLabel;
+}
+
 function getDisplayClass(weatherObj) {
   if (!weatherObj) return "status-gray";
 
@@ -155,20 +182,6 @@ function getDisplayClass(weatherObj) {
   }
 
   return statusClass(weatherObj.status);
-}
-
-function getDisplaySourceLabel(weatherObj) {
-  return weatherObj?.sourceLabel || "";
-}
-
-function getDisplayReason(weatherObj) {
-  if (!weatherObj) return "";
-
-  if (!weatherObj.isOfficial && weatherObj.reason) {
-    return `${weatherObj.reason} (Estimated)`;
-  }
-
-  return weatherObj.reason || "";
 }
 
 function statusClass(status) {
