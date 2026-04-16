@@ -1,20 +1,18 @@
 export const REFRESH_MINUTES = 5;
 
 export const REGIONS = [
-  {
-    id: "northeast",
-    name: "Northeast",
-    airports: [
-      { airportId: "KBED", sortIndex: 1, lat: 42.4699, lon: -71.2890, elevationFt: 133, hasMetar: true },
-      { airportId: "KMVY", sortIndex: 2, lat: 41.3931, lon: -70.6143, elevationFt: 67, hasMetar: true },
-      { airportId: "KACK", sortIndex: 3, lat: 41.2531, lon: -70.0602, elevationFt: 48, hasMetar: true },
-      { airportId: "KHPN", sortIndex: 4, lat: 41.0670, lon: -73.7076, elevationFt: 439, hasMetar: true },
-      { airportId: "KJFK", sortIndex: 5, lat: 40.6413, lon: -73.7781, elevationFt: 13, hasMetar: true },
-      { airportId: "KLGA", sortIndex: 6, lat: 40.7769, lon: -73.8740, elevationFt: 21, hasMetar: true },
-      { airportId: "KEWR", sortIndex: 7, lat: 40.6895, lon: -74.1745, elevationFt: 18, hasMetar: true },
-      { airportId: "KOXC", sortIndex: 8, lat: 41.4786, lon: -73.1352, elevationFt: 726, hasMetar: true }
-    ]
-  },
+{
+  id: "northeast",
+  name: "Northeast",
+  airports: [
+    { airportId: "KBED", sortIndex: 1, lat: 42.4699, lon: -71.2890, elevationFt: 133, hasMetar: true },
+    { airportId: "KMVY", sortIndex: 2, lat: 41.3931, lon: -70.6143, elevationFt: 67, hasMetar: true },
+    { airportId: "KACK", sortIndex: 3, lat: 41.2531, lon: -70.0602, elevationFt: 48, hasMetar: true },
+    { airportId: "KHPN", sortIndex: 4, lat: 41.0670, lon: -73.7076, elevationFt: 439, hasMetar: true },
+    { airportId: "KTEB", sortIndex: 5, lat: 40.8501, lon: -74.0608, elevationFt: 9, hasMetar: true },
+    { airportId: "KOXC", sortIndex: 6, lat: 41.4786, lon: -73.1352, elevationFt: 726, hasMetar: true }
+  ]
+},
   {
     id: "florida_bahamas",
     name: "Florida / Bahamas",
