@@ -30,19 +30,16 @@ export async function fetchMarineFogAlerts() {
 
   if (!fogPeriods.length) return [];
 
-  const alerts = [];
+  const airports = ["KACK", "KMVY"];
 
-  for (const period of fogPeriods) {
-    const displayDate = formatAlertDate(period.resolvedDate);
-    const detail = buildMarineDetail(period, zoneId, displayDate);
-
-    alerts.push(
-      buildMarineAlert("KACK", detail, text, displayDate),
-      buildMarineAlert("KMVY", detail, text, displayDate)
-    );
-  }
-
-  return dedupeMarineAlerts(alerts);
+  return airports.map(airportId =>
+    buildAggregatedMarineAlert({
+      airportId,
+      zoneId,
+      rawText: text,
+      fogPeriods
+    })
+  );
 }
 
 async function fetchZoneText(zoneId) {
@@ -63,15 +60,6 @@ async function fetchZoneText(zoneId) {
 }
 
 function parseIssueDate(text) {
-  // Example:
-  // 1022 PM EDT Wed Apr 15 2026
-  const match = text.match(
-    /\b\d{3,4}\s+(AM|PM)\s+[A-Z]{2,4}\s+\w{3}\s+\w{3}\s+(\d{1,2})\s+(\d{4})\b/
-  );
-
-  if (!match) return null;
-
-  // Grab the entire matched date line more flexibly
   const lineMatch = text.match(
     /\b(\d{3,4})\s+(AM|PM)\s+([A-Z]{2,4})\s+(\w{3})\s+(\w{3})\s+(\d{1,2})\s+(\d{4})\b/
   );
@@ -198,11 +186,20 @@ function formatAlertDate(date) {
   });
 }
 
-function buildMarineDetail(period, zoneId, displayDate) {
-  return `${zoneId} marine forecast includes fog for ${displayDate} (${period.label}). Supplemental marine alert. ${period.text}`;
-}
+function buildAggregatedMarineAlert({ airportId, zoneId, rawText, fogPeriods }) {
+  const uniqueDates = dedupeStrings(
+    fogPeriods.map(period => formatAlertDate(period.resolvedDate))
+  );
 
-function buildMarineAlert(airportId, detail, rawText, displayDate) {
+  const uniqueLabels = dedupeStrings(
+    fogPeriods.map(period => period.label)
+  );
+
+  const detailLines = fogPeriods.map(period => {
+    const displayDate = formatAlertDate(period.resolvedDate);
+    return `${displayDate} (${period.label}): ${period.text}`;
+  });
+
   return {
     airportId,
     regionId: "northeast",
@@ -210,22 +207,17 @@ function buildMarineAlert(airportId, detail, rawText, displayDate) {
     status: "blue",
     severityRank: 1,
     category: "FOG",
-    headline: `${airportId} MARINE FOG ${displayDate}`,
-    reason: `Forecasted fog on ${displayDate}`,
-    detail,
-    rawText
+    headline: `${airportId} MARINE FOG`,
+    reason: `Forecasted fog on ${uniqueDates.join(", ")}`,
+    detail: `${zoneId} marine forecast indicates fog on ${uniqueDates.join(", ")}. Supplemental marine alert.\n\n${detailLines.join("\n")}`,
+    rawText,
+    fogDates: uniqueDates,
+    fogPeriods: uniqueLabels
   };
 }
 
-function dedupeMarineAlerts(alerts) {
-  const seen = new Set();
-
-  return alerts.filter(alert => {
-    const key = `${alert.airportId}|${alert.reason}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+function dedupeStrings(values) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function monthToIndex(monthStr) {
