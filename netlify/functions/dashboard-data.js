@@ -1,5 +1,6 @@
 import { getAllAirportIds, getAllAirportConfigs } from "../../src/config/airports.js";
 import { buildDashboardResponse } from "../../src/lib/buildResponse.js";
+import { fetchMarineFogAlerts } from "../../src/lib/marineFog.js";
 
 const AVIATION_WEATHER_BASE_URL = "https://aviationweather.gov/api/data";
 const OPEN_METEO_BASE_URL = "https://api.open-meteo.com/v1/forecast";
@@ -10,9 +11,10 @@ export async function handler() {
     const airportConfigs = getAllAirportConfigs();
     const idsParam = airportIds.join(",");
 
-    const [metarRecords, tafRecords] = await Promise.all([
+    const [metarRecords, tafRecords, marineFogAlerts] = await Promise.all([
       fetchMetarData(idsParam),
-      fetchTafData(idsParam)
+      fetchTafData(idsParam),
+      fetchMarineFogAlerts()
     ]);
 
     const metarAirportSet = new Set(
@@ -43,6 +45,8 @@ export async function handler() {
       fallbackForecastRecords,
       lastUpdatedUtc: new Date().toISOString()
     });
+
+    responseBody.alerts = mergeAlerts(responseBody.alerts || [], marineFogAlerts || []);
 
     return jsonResponse(200, responseBody);
   } catch (error) {
@@ -174,7 +178,6 @@ function mapOpenMeteoCurrentToFallbackRecord(airport, data) {
   const highCloudCover = normalizeNumber(current.cloud_cover_high);
   const totalCloudCover = normalizeNumber(current.cloud_cover);
   const windKt = normalizeNumber(current.wind_speed_10m);
-  const weatherCode = current.weather_code ?? null;
 
   const classification = classifyFallbackCategory({
     visibilitySm,
@@ -340,9 +343,6 @@ function classifyFallbackCategory({ visibilitySm, ceilingFt, lowCloudCover }) {
     };
   }
 
-  // Conservative ceiling-risk heuristic:
-  // If low cloud cover is very high and we do not have a real ceiling,
-  // force estimated IFR to prompt human review.
   if (ceilingFt === null && lowCloudCover !== null && lowCloudCover >= 85) {
     return {
       category: "IFR",
@@ -391,10 +391,7 @@ function buildFallbackReason({ classification, visibilitySm, ceilingFt, lowCloud
     return `Estimated by cloud base ${ceilingFt} ft`;
   }
 
-  if (
-    classification.triggerType === "LOW_CLOUD_HEURISTIC" &&
-    lowCloudCover !== null
-  ) {
+  if (classification.triggerType === "LOW_CLOUD_HEURISTIC" && lowCloudCover !== null) {
     return `Estimated IFR due to high low-cloud coverage (${lowCloudCover}%) - investigate official weather`;
   }
 
@@ -418,6 +415,27 @@ function normalizeNumber(value) {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function mergeAlerts(existingAlerts, marineAlerts) {
+  const merged = [...existingAlerts, ...marineAlerts];
+
+  merged.sort((a, b) => {
+    if ((b.severityRank ?? -1) !== (a.severityRank ?? -1)) {
+      return (b.severityRank ?? -1) - (a.severityRank ?? -1);
+    }
+
+    if ((a.airportId || "") !== (b.airportId || "")) {
+      return String(a.airportId || "").localeCompare(String(b.airportId || ""));
+    }
+
+    return String(a.source || "").localeCompare(String(b.source || ""));
+  });
+
+  return merged.map((alert, index) => ({
+    ...alert,
+    sortOrder: index + 1
+  }));
 }
 
 function jsonResponse(statusCode, body) {
